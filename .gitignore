@@ -1,5 +1,5 @@
-# Your settings and signing key stay on your machine
-config.properties
+# Your signing key stays on your machine (config.properties is intentionally tracked in this
+# private fork — see CLAUDE.md for why upstream excludes it)
 *.keystore
 *.idsig
 # An LG TV's app list and icons (webos/apps.py)

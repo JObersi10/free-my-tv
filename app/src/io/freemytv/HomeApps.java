@@ -96,11 +96,6 @@ final class HomeApps {
      */
     private static final String[][] SHELF = {
         {"netflix", "Netflix", "com.netflix.ninja", "E50914", "", "1"},
-        {"youtube", "YouTube", "com.google.android.youtube.tv", "FF0033", "play", "1"},
-        {"youtube", "YouTube", "com.amazon.firetv.youtube", "FF0033", "play", "1"},
-        {"prime", "Prime Video", "com.amazon.amazonvideo.livingroom", "1A98FF", "tint", "0.96"},
-        {"prime", "Prime Video", "com.amazon.firebat", "1A98FF", "tint", "0.96"},
-        {"prime", "Prime Video", "com.amazon.avod", "1A98FF", "tint", "0.96"},
         {"disney", "Disney+", "com.disney.disneyplus", "1838C8", "", "1"},
         {"max", "Max", "com.wbd.stream", "6C3BE0", "", "1.32"},
         {"max", "HBO Max", "com.hbo.hbonow", "6C3BE0", "", "1.32"},
@@ -120,7 +115,12 @@ final class HomeApps {
         {"premier", "Premier", "gpm.tnt_premier", "FF2D55", "", "1"},
         {"amediateka", "Амедиатека", "ru.amediateka", "E31E24", "", "1"},
         {"wink", "Wink", "ru.rt.video.app.tv", "FF5A1F", "", "1"},
-        {"spotify", "Spotify", "com.spotify.tv.android", "1DB954", "", "1"},
+        // universal.sh patch: pin the extra apps it installs onto the shelf too.
+        {"tizentube", "TizenTube", "io.gh.reisxd.tizentube.cobalt", "FF0000", "", "1"},
+        {"phairplay", "PhairPlay", "com.phairplay.firetv", "FFFFFF", "", "1"},
+        {"applemusictv", "Apple Music TV", "com.applemusicktv", "FA233B", "", "1"},
+        {"stremio", "Stremio", "com.stremio.one", "7B5BF5", "", "1"},
+        {"myspoti", "Myspoti", "app.myspoti.stable", "1DB954", "", "1"},
     };
     /**
      * Apps the shelf shows at once (it scrolls for the rest): 8, today's smallest tiles (178 wide in HomeView's 1760 of
@@ -370,6 +370,12 @@ final class HomeApps {
         items.add(shortcut(ALL_APPS, "all", Ui.tr("All Apps"), "apps"));
         items.add(shortcut(SETTINGS, "settings", Ui.tr("Home Settings"), "settings"));
         items.add(shortcut(ANDROID_SETTINGS, "tv-settings", Ui.tr("TV Settings"), "tv_settings"));
+        // universal.sh addition: only where the redirect helper is actually installed.
+        try {
+            c.getPackageManager().getPackageInfo("com.gathin.tvhome", 0);
+            items.add(shortcut(DEVICE, "firetv-home", "Fire TV Home", "tv"));
+        } catch (android.content.pm.PackageManager.NameNotFoundException ignored) {
+        }
         // Android's list of apps (force stop, clear data, uninstall), where TV Settings opens the maker's own menu: a
         // Philips TPM171E (Android 8) has no Apps there, and its stock home screen was the way to an app's page (#452).
         String tvSettings = answers(c, new Intent(Settings.ACTION_SETTINGS));
@@ -628,6 +634,22 @@ final class HomeApps {
 
     /** Opens the item; `options` for the transition, or null (the screensaver has no card to grow out of). */
     static boolean open(Context a, Item it, android.os.Bundle options) {
+        // universal.sh addition: the Fire TV Home shortcut. Fire OS always redirects Amazon's launcher straight
+        // back to us, so going there for real needs the redirect helper (com.gathin.tvhome) told to pause first.
+        if ("firetv-home".equals(it.key)) {
+            try {
+                a.sendBroadcast(new Intent("com.gathin.tvhome.PAUSE_REDIRECT").setPackage("com.gathin.tvhome"));
+            } catch (SecurityException e) {
+                AppLog.w("Fire TV Home: couldn't reach the redirect helper: " + e.getMessage());
+            }
+            try {
+                a.startActivity(new Intent().setComponent(new ComponentName("com.amazon.tv.launcher",
+                        "com.amazon.tv.launcher.ui.HomeActivity_vNext")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            } catch (ActivityNotFoundException | SecurityException e) {
+                AppLog.w("Fire TV Home: couldn't open Amazon's launcher: " + e.getMessage());
+            }
+            return true;
+        }
         // plain: tried when `intent` finds nothing (the app's own home, when it won't take the title's address)
         Intent intent, plain = null;
         switch (it.kind) {

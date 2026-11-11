@@ -167,6 +167,11 @@ final class Photos {
         return backdrop;
     }
 
+    /** The file behind the current backdrop() (for its Unsplash credit, if it has one), or null. */
+    static synchronized File currentBackdropFile() {
+        return built;
+    }
+
     // MARK: - Importing what the computer sent
 
     private static boolean importing;

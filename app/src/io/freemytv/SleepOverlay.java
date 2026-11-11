@@ -63,7 +63,10 @@ public class SleepOverlay extends Service {
                 .putExtra("language", Prefs.language());
         boolean wanted = Prefs.sleepShown() && SleepTimer.minutesLeft(c) > 0;
         if (wanted && Settings.canDrawOverlays(c)) {
-            c.startForegroundService(i);
+            // startForegroundService() itself is API 26+; before that, startService() plus this service's own
+            // startForeground() call in onCreate (below) is what "foreground service" meant on Android 7.
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) c.startForegroundService(i);
+            else c.startService(i);
         } else {
             c.stopService(i);
             if (wanted && Capabilities.overlay(c)) allow(c.getApplicationContext());

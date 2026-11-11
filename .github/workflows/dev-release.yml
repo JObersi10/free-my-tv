@@ -1,0 +1,53 @@
+# Builds the Google TV APK from whatever's on main and republishes it under the same rolling "dev"
+# release/tag on every push, signed with a dedicated CI key (FREEMYTV_KEYSTORE_B64/_PASS secrets) so
+# each build installs over the last one without having to uninstall first.
+name: Dev release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+# A new push replaces the in-flight build for the one before it; there's only ever one "dev" release.
+concurrency:
+  group: dev-release
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Android SDK (build-tools 34, android-34)
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$RUNNER_TEMP/sdk" \
+            "build-tools;34.0.0" "platforms;android-34" > /dev/null
+          echo "ANDROID_HOME=$RUNNER_TEMP/sdk" >> "$GITHUB_ENV"
+
+      - name: Decode the CI signing key
+        run: echo "${{ secrets.FREEMYTV_KEYSTORE_B64 }}" | base64 -d > "$RUNNER_TEMP/dev.keystore"
+
+      - name: Build
+        env:
+          FREEMYTV_KEYSTORE: ${{ runner.temp }}/dev.keystore
+          FREEMYTV_KEYSTORE_PASS: ${{ secrets.FREEMYTV_KEYSTORE_PASS }}
+        run: ./build.sh
+
+      - name: Publish the rolling dev release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dev
+          name: Dev build
+          prerelease: true
+          body: |
+            Automatic build of ${{ github.sha }} on main. Always signed with the same CI key, so this
+            installs over the previous dev build (`adb install -r FreeMyTV.apk`) without uninstalling.
+          files: FreeMyTV.apk

@@ -702,6 +702,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         recs.refreshIfStale();
         Photos.importInbox(getContext(), ownReady);   // photos a computer just sent
         ImmichPhotos.syncIfDue(getContext(), ownReady);   // or a new choice from the Immich server, every 6 hours
+        RandomPhotos.syncIfDue(getContext(), ownReady);   // a new choice of random photos, with a short cooldown
+        RandomPhotos.startIdleTimer(getContext());        // and again on its own every 15 min even if left idle
         if (tvInputs != null) tvInputs.registerCallback(inputCallback, handler);
         startStatus();
         handler.postDelayed(tick, 15_000);
