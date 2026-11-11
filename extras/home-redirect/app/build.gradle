@@ -1,0 +1,59 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.gathin.tvhome'
+    compileSdk 34
+
+    // Optional name for the greeting ("Good evening, Alex"): tvhome.userName=Alex in launcher/local.properties.
+    def localProps = new Properties()
+    def localFile = rootProject.file('local.properties')
+    if (localFile.exists()) localFile.withInputStream { localProps.load(it) }
+
+    defaultConfig {
+        resValue 'string', 'user_name', localProps.getProperty('tvhome.userName', '')
+        applicationId 'com.gathin.tvhome'
+        minSdk 25
+        targetSdk 29
+        versionCode 2
+        versionName '2.0'
+    }
+
+    // Local dev keeps Gradle's own per-machine debug keystore (unset env vars below). CI signs
+    // every build with the same dedicated key instead, so each dev release installs over the
+    // last one on the TV without having to uninstall first (TVHOME_KEYSTORE/_PASS secrets).
+    def ciKeystore = System.getenv('TVHOME_KEYSTORE')
+    def ciKeystorePass = System.getenv('TVHOME_KEYSTORE_PASS')
+
+    if (ciKeystore) {
+        signingConfigs {
+            ci {
+                storeFile file(ciKeystore)
+                storePassword ciKeystorePass
+                keyAlias 'tvhome'
+                keyPassword ciKeystorePass
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (ciKeystore) signingConfig signingConfigs.ci
+        }
+        debug {
+            if (ciKeystore) signingConfig signingConfigs.ci
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.recyclerview:recyclerview:1.3.2'
+    implementation 'androidx.dynamicanimation:dynamicanimation:1.0.0'
+}

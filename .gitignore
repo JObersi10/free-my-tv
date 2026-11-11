@@ -17,3 +17,8 @@ __pycache__/
 # macOS
 .DS_Store
 tools/.i18n-cache.json
+
+# Embedded home-redirect helper (extras/home-redirect/) build output
+extras/home-redirect/.gradle/
+extras/home-redirect/local.properties
+extras/home-redirect/app/build/
