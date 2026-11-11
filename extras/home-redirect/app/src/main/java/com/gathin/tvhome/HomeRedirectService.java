@@ -13,6 +13,12 @@ import android.util.Log;
 import android.provider.Settings;
 import android.view.accessibility.AccessibilityEvent;
 
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileReader;
+import java.util.HashMap;
+import java.util.Map;
+
 /**
  * Makes this launcher the home screen on Fire OS, which ignores the default-home setting.
  *
@@ -81,7 +87,10 @@ public class HomeRedirectService extends AccessibilityService {
         long now = SystemClock.uptimeMillis();
         for (String app : SETTINGS_APPS) if (pkg.toString().startsWith(app)) settingsSeenAt = now;
         handler.removeCallbacks(redirect);
-        if (!AMAZON_LAUNCHER.contentEquals(pkg) || !cls.toString().contains(AMAZON_HOME)) return;
+        if (!AMAZON_LAUNCHER.contentEquals(pkg) || !cls.toString().contains(AMAZON_HOME)) {
+            checkButtonRedirect(pkg.toString());
+            return;
+        }
         if (now - settingsSeenAt < SETTINGS_GRACE_MS) {
             Log.i(TAG, "home screen on the way into Settings: left alone");
             return;
@@ -92,6 +101,72 @@ public class HomeRedirectService extends AccessibilityService {
         }
         Log.i(TAG, "home screen: opening launcher");
         handler.post(redirect);
+    }
+
+    // ---- quick-app-button redirect (Prime Video / Disney+ / Peacock / etc.) ---------------------
+    //
+    // Fire OS's quick-app remote buttons (Netflix/Prime/Disney+/...) never reach onKeyEvent, even with
+    // canRequestFilterKeyEvents (confirmed live: Key Mapper's own trigger recorder saw nothing when pressed,
+    // same as the Home key below). So this can't block the press itself - instead, same trick as the Home
+    // redirect: let the button do what it already does (launch the real app), watch for that app's window
+    // appearing, and immediately jump elsewhere before the user settles on it. There's an unavoidable brief
+    // flash of the original app (same as the Home-screen flash above) and this fires the same way whether the
+    // app was opened by its remote button or by its icon on the home screen - Fire OS gives no event data
+    // to tell those apart, so this affects the whole app, not just its dedicated button.
+    //
+    // Configured over adb, no app UI, no rebuild needed. One mapping per line in a plain text file at
+    // getExternalFilesDir()/button_redirects.txt (push with adb, e.g.
+    //   adb push button_redirects.txt /sdcard/Android/data/com.gathin.tvhome/files/button_redirects.txt
+    // ), each line "source.package=target.package" or "source.package=OFF" (OFF bounces back to this
+    // launcher, same as pressing Home). Blank lines and lines starting with # are ignored. Re-read whenever
+    // its mtime changes, so no restart is needed after pushing a new version.
+    private final Map<String, String> buttonRedirects = new HashMap<>();
+    private long buttonRedirectsMtime = -1;
+
+    private void loadButtonRedirectsIfChanged() {
+        File f = new File(getExternalFilesDir(null), "button_redirects.txt");
+        long mtime = f.lastModified();
+        if (mtime == buttonRedirectsMtime) return;
+        buttonRedirectsMtime = mtime;
+        buttonRedirects.clear();
+        if (mtime == 0) return; // file doesn't exist
+        try (BufferedReader r = new BufferedReader(new FileReader(f))) {
+            String line;
+            while ((line = r.readLine()) != null) {
+                line = line.trim();
+                if (line.isEmpty() || line.startsWith("#")) continue;
+                int eq = line.indexOf('=');
+                if (eq <= 0) continue;
+                buttonRedirects.put(line.substring(0, eq).trim(), line.substring(eq + 1).trim());
+            }
+            Log.i(TAG, "button_redirects.txt: " + buttonRedirects.size() + " mapping(s) loaded");
+        } catch (Exception e) {
+            Log.w(TAG, "button_redirects.txt: couldn't read it (" + e + ")");
+        }
+    }
+
+    private void checkButtonRedirect(String pkg) {
+        loadButtonRedirectsIfChanged();
+        String target = buttonRedirects.get(pkg);
+        if (target == null) return;
+        if ("OFF".equals(target)) {
+            Log.i(TAG, pkg + " opened: bouncing back (configured OFF)");
+            openLauncher();
+            return;
+        }
+        Log.i(TAG, pkg + " opened: redirecting to " + target);
+        Intent launch = getPackageManager().getLaunchIntentForPackage(target);
+        if (launch == null) {
+            Log.w(TAG, target + " has no launch intent (not installed?) - bouncing back instead");
+            openLauncher();
+            return;
+        }
+        try {
+            startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION));
+        } catch (ActivityNotFoundException | SecurityException e) {
+            Log.w(TAG, "couldn't start " + target + " (" + e + ") - bouncing back instead");
+            openLauncher();
+        }
     }
 
     @Override
