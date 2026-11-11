@@ -90,6 +90,13 @@ public class HomeRedirectService extends AccessibilityService {
             checkButtonRedirect(pkg.toString());
             return;
         }
+        // Button redirects can be wanted without replacing the Home button itself (someone who said
+        // "no" to the Home-button question but "yes" to remapping app buttons) - this file's presence
+        // is universal.sh's way of saying so; its absence (the default) is "yes, redirect Home too",
+        // same as before this flag existed.
+        if (new File(getFilesDir(), "home_redirect_off").exists()) {
+            return;
+        }
         if (now - settingsSeenAt < SETTINGS_GRACE_MS) {
             Log.i(TAG, "home screen on the way into Settings: left alone");
             return;
