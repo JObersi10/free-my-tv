@@ -15,8 +15,11 @@ import android.view.accessibility.AccessibilityEvent;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
+import java.io.InputStreamReader;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Makes this launcher the home screen on Fire OS, which ignores the default-home setting.
@@ -36,6 +39,7 @@ public class HomeRedirectService extends AccessibilityService {
     private static final String TAG = "HomeRedirect";
     private static final String AMAZON_LAUNCHER = "com.amazon.tv.launcher";
     private static final String AMAZON_HOME = "HomeActivity";
+    private static final String AMAZON_APPSTORE = "com.amazon.venezia";
     private static final String[] SETTINGS_APPS = {"com.amazon.tv.settings", "com.amazon.tv.quicksettings"};
     private static final long SETTINGS_GRACE_MS = 2000;     // measured: settings window -> home flash ~200 ms
     private static final long BOOT_WINDOW_MS = 3 * 60_000;  // service connecting this soon after boot = boot
@@ -67,6 +71,7 @@ public class HomeRedirectService extends AccessibilityService {
     public void onDestroy() {
         super.onDestroy();
         try { unregisterReceiver(pauseReceiver); } catch (RuntimeException ignored) { }
+        stopKeyWatcher();
     }
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -76,6 +81,7 @@ public class HomeRedirectService extends AccessibilityService {
     @Override
     protected void onServiceConnected() {
         if (SystemClock.elapsedRealtime() < BOOT_WINDOW_MS) openLauncher();
+        startKeyWatcher();
     }
 
     @Override
@@ -87,6 +93,13 @@ public class HomeRedirectService extends AccessibilityService {
         for (String app : SETTINGS_APPS) if (pkg.toString().startsWith(app)) settingsSeenAt = now;
         handler.removeCallbacks(redirect);
         if (!AMAZON_LAUNCHER.contentEquals(pkg) || !cls.toString().contains(AMAZON_HOME)) {
+            if (AMAZON_APPSTORE.contentEquals(pkg) && now - lastKeyRedirectAt < KEY_PUSHBACK_MS) {
+                // Same push-back the keycode watcher's own redirect already did, for the Appstore's second,
+                // delayed page landing back on top a moment later (fire-buttons' own README documents this).
+                Log.i(TAG, "Appstore's delayed page came back - pushing it back to " + lastKeyRedirectTarget);
+                redirectToConfiguredTarget(lastKeyRedirectTarget);
+                return;
+            }
             checkButtonRedirect(pkg.toString());
             return;
         }
@@ -128,10 +141,13 @@ public class HomeRedirectService extends AccessibilityService {
     // that reliably without fighting Android 11's FUSE layer, which blocked external storage here even for
     // run-as). Push a new one with:
     //   adb shell "run-as com.gathin.tvhome mkdir -p files" && adb shell "run-as com.gathin.tvhome sh -c 'cat > files/button_redirects.txt'" < button_redirects.txt
-    // Each line is "source.package=target.package" or "source.package=OFF" (OFF bounces back to this
-    // launcher, same as pressing Home). Blank lines and lines starting with # are ignored. Re-read whenever
-    // its mtime changes, so no restart is needed after pushing a new version.
+    // Each line is either "source.package=target.package" (or "=OFF") for an app that's installed and
+    // enabled - matched by window-watch, same as the Home redirect above - or "KEY<n>=target.package" for
+    // a button whose app is NOT installed/enabled, matched by the keycode watcher below instead (see its
+    // own comment for why window-watch can't see that case at all). Both forms also accept "=OFF". Blank
+    // lines and lines starting with # are ignored. Re-read whenever the file's mtime changes.
     private final Map<String, String> buttonRedirects = new HashMap<>();
+    private final Map<Integer, String> buttonRedirectsByKey = new HashMap<>();
     private long buttonRedirectsMtime = -1;
 
     private void loadButtonRedirectsIfChanged() {
@@ -140,6 +156,7 @@ public class HomeRedirectService extends AccessibilityService {
         if (mtime == buttonRedirectsMtime) return;
         buttonRedirectsMtime = mtime;
         buttonRedirects.clear();
+        buttonRedirectsByKey.clear();
         if (mtime == 0) return; // file doesn't exist
         try (BufferedReader r = new BufferedReader(new FileReader(f))) {
             String line;
@@ -148,9 +165,17 @@ public class HomeRedirectService extends AccessibilityService {
                 if (line.isEmpty() || line.startsWith("#")) continue;
                 int eq = line.indexOf('=');
                 if (eq <= 0) continue;
-                buttonRedirects.put(line.substring(0, eq).trim(), line.substring(eq + 1).trim());
+                String key = line.substring(0, eq).trim(), target = line.substring(eq + 1).trim();
+                if (key.startsWith("KEY")) {
+                    try {
+                        buttonRedirectsByKey.put(Integer.parseInt(key.substring(3)), target);
+                    } catch (NumberFormatException ignored) { }
+                } else {
+                    buttonRedirects.put(key, target);
+                }
             }
-            Log.i(TAG, "button_redirects.txt: " + buttonRedirects.size() + " mapping(s) loaded");
+            Log.i(TAG, "button_redirects.txt: " + buttonRedirects.size() + " package + "
+                    + buttonRedirectsByKey.size() + " keycode mapping(s) loaded");
         } catch (Exception e) {
             Log.w(TAG, "button_redirects.txt: couldn't read it (" + e + ")");
         }
@@ -160,12 +185,15 @@ public class HomeRedirectService extends AccessibilityService {
         loadButtonRedirectsIfChanged();
         String target = buttonRedirects.get(pkg);
         if (target == null) return;
-        if ("OFF".equals(target)) {
-            Log.i(TAG, pkg + " opened: bouncing back (configured OFF)");
+        Log.i(TAG, pkg + " opened: " + ("OFF".equals(target) ? "bouncing back (configured OFF)" : "redirecting to " + target));
+        redirectToConfiguredTarget(target);
+    }
+
+    private void redirectToConfiguredTarget(String target) {
+        if (target == null || "OFF".equals(target)) {
             openLauncher();
             return;
         }
-        Log.i(TAG, pkg + " opened: redirecting to " + target);
         Intent launch = getPackageManager().getLaunchIntentForPackage(target);
         if (launch == null) {
             Log.w(TAG, target + " has no launch intent (not installed?) - bouncing back instead");
@@ -173,6 +201,61 @@ public class HomeRedirectService extends AccessibilityService {
             return;
         }
         launchThroughBlackout(launch, null);
+    }
+
+    // ---- keycode-based redirect (button's app not installed/enabled) ------------------------------
+    //
+    // Window-watch above needs the button's app to actually launch a window for us to see - but when
+    // that app is missing or disabled, Fire OS's own key policy (FireTVKeyPolicyManager) opens that
+    // app's Amazon Appstore page instead, and never gets as far as a window we could match by package.
+    // Fire OS does log the raw press first, though: "KeyPressReceiver: Remote button pressed. keyCode:
+    // N" (github.com/enlightened-d/fire-buttons worked this out) - a signal window-watch categorically
+    // can't get, since it's gone before any window appears. This tails logcat for that line (needs
+    // android.permission.READ_LOGS, force-granted over adb the same way as WRITE_SECURE_SETTINGS: a
+    // normal app can't request it, but adb's shell UID can grant it regardless) and redirects the
+    // instant it sees a configured keycode - no need to wait for the Appstore page first. Its own
+    // delayed second page landing on top a few seconds later is caught by the ordinary window-watch
+    // path above (AMAZON_APPSTORE + KEY_PUSHBACK_MS), since by then it's just an ordinary window.
+    private static final Pattern KEY_PRESS_LINE = Pattern.compile("Remote button pressed\\. keyCode: (\\d+)");
+    private static final long KEY_PUSHBACK_MS = 8_000;
+    private volatile Process logcatProcess;
+    private Thread keyWatcherThread;
+    private long lastKeyRedirectAt = -KEY_PUSHBACK_MS;
+    private String lastKeyRedirectTarget;
+
+    private void startKeyWatcher() {
+        if (keyWatcherThread != null) return;
+        keyWatcherThread = new Thread(this::runKeyWatcher, "HomeRedirect-KeyWatcher");
+        keyWatcherThread.setDaemon(true);
+        keyWatcherThread.start();
+    }
+
+    private void stopKeyWatcher() {
+        if (logcatProcess != null) { logcatProcess.destroy(); logcatProcess = null; }
+        if (keyWatcherThread != null) { keyWatcherThread.interrupt(); keyWatcherThread = null; }
+    }
+
+    private void runKeyWatcher() {
+        try {
+            logcatProcess = Runtime.getRuntime().exec(new String[]{"logcat", "-v", "brief"});
+            try (BufferedReader r = new BufferedReader(new InputStreamReader(logcatProcess.getInputStream()))) {
+                String line;
+                while ((line = r.readLine()) != null) {
+                    Matcher m = KEY_PRESS_LINE.matcher(line);
+                    if (!m.find()) continue;
+                    int keyCode = Integer.parseInt(m.group(1));
+                    loadButtonRedirectsIfChanged();
+                    String target = buttonRedirectsByKey.get(keyCode);
+                    if (target == null) continue;
+                    Log.i(TAG, "keyCode " + keyCode + " pressed (app not installed/enabled): redirecting to " + target);
+                    lastKeyRedirectAt = SystemClock.uptimeMillis();
+                    lastKeyRedirectTarget = target;
+                    handler.post(() -> redirectToConfiguredTarget(target));
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "keycode watcher stopped (" + e + ") - keycode-based remaps (apps not installed) won't fire until the service restarts");
+        }
     }
 
     // Hands a destination Intent off through BlackoutActivity instead of starting it directly, so a
