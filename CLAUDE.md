@@ -480,7 +480,11 @@ entries; its system pieces are in `PROTECTED`. USB debugging opens ADB on 5555 t
   `extras/home-redirect/` (`HomeRedirectService.checkButtonRedirect`): since the press can't be blocked, it watches
   for the real app's window appearing (same window-watch trick as the Home redirect) and jumps to the configured
   target before the user settles on it - which means it fires the same way whether the app was opened by its
-  button or its home-screen icon, since Fire OS gives no event data to tell those apart. Configured entirely over
+  button or its home-screen icon. This isn't a gap in this implementation - `TYPE_WINDOW_STATE_CHANGED` (the only
+  signal available here) carries no cause field at all, button press or icon tap alike, so no accessibility
+  service could tell those apart without root-level input tracing. Remapping an installed app's button means
+  that app stops opening at all, from anywhere, not just from its button - tell the person that plainly before
+  they pick a target. Configured entirely over
   adb, no rebuild: a plain-text `source.package=target.package` (or `=OFF`) file in `com.gathin.tvhome`'s internal
   storage, reachable with `run-as` (external/scoped storage blocked `run-as` itself from even `mkdir`-ing there on
   a real device). `universal.sh`'s `configure_button_redirects` drives the whole setup: detects which physical
