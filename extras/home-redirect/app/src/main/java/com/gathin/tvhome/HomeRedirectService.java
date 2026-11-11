@@ -1,7 +1,6 @@
 package com.gathin.tvhome;
 
 import android.accessibilityservice.AccessibilityService;
-import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -109,10 +108,13 @@ public class HomeRedirectService extends AccessibilityService {
     // canRequestFilterKeyEvents (confirmed live: Key Mapper's own trigger recorder saw nothing when pressed,
     // same as the Home key below). So this can't block the press itself - instead, same trick as the Home
     // redirect: let the button do what it already does (launch the real app), watch for that app's window
-    // appearing, and immediately jump elsewhere before the user settles on it. There's an unavoidable brief
-    // flash of the original app (same as the Home-screen flash above) and this fires the same way whether the
-    // app was opened by its remote button or by its icon on the home screen - Fire OS gives no event data
-    // to tell those apart, so this affects the whole app, not just its dedicated button.
+    // appearing, and immediately jump elsewhere before the user settles on it - through BlackoutActivity
+    // (a plain black, no-animation stopover) rather than straight to the destination, so a solid black
+    // frame covers the unwanted app the instant Android can show anything at all, instead of the
+    // destination's own (sometimes slower) first frame being the only thing masking it - most noticeable,
+    // and most helped by this, when the TV is already lagging. This fires the same way whether the app was
+    // opened by its remote button or by its icon on the home screen - Fire OS gives no event data to tell
+    // those apart, so this affects the whole app, not just its dedicated button.
     //
     // Configured over adb, no app UI, no rebuild needed. One mapping per line in a plain text file in this
     // app's private internal storage (getFilesDir(), not external/scoped storage - adb's "run-as" reaches
@@ -163,12 +165,24 @@ public class HomeRedirectService extends AccessibilityService {
             openLauncher();
             return;
         }
-        try {
-            startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION));
-        } catch (ActivityNotFoundException | SecurityException e) {
-            Log.w(TAG, "couldn't start " + target + " (" + e + ") - bouncing back instead");
-            openLauncher();
+        launchThroughBlackout(launch, null);
+    }
+
+    // Hands a destination Intent off through BlackoutActivity instead of starting it directly, so a
+    // plain black frame covers whatever's mid-render on screen as soon as Android can show anything at
+    // all, instead of the destination's own first frame being the only thing masking it. No fixed delay:
+    // BlackoutActivity finishes itself right after the hand-off, and Android keeps its black content up
+    // until the destination actually has a frame ready to replace it, same as any other activity
+    // transition with no animation telling it to do otherwise. fallback (nullable) is tried if primary
+    // doesn't actually start (not installed, SecurityException, etc).
+    private void launchThroughBlackout(Intent primary, Intent fallback) {
+        Intent via = new Intent(this, BlackoutActivity.class)
+                .putExtra(BlackoutActivity.EXTRA_TARGET, primary.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION);
+        if (fallback != null) {
+            via.putExtra(BlackoutActivity.EXTRA_FALLBACK, fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION));
         }
+        startActivity(via);
     }
 
     @Override
@@ -185,15 +199,9 @@ public class HomeRedirectService extends AccessibilityService {
     private static final String REDIRECT_ACTIVITY = "io.freemytv.HomeActivity";
 
     private void openLauncher() {
-        try {
-            startActivity(new Intent()
-                    .setComponent(new ComponentName(REDIRECT_PACKAGE, REDIRECT_ACTIVITY))
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION));
-        } catch (ActivityNotFoundException | SecurityException e) {
-            Log.w(TAG, "could not open " + REDIRECT_PACKAGE + " (" + e + "), falling back to this launcher's own screen");
-            startActivity(new Intent(this, MainActivity.class)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION));
-        }
+        launchThroughBlackout(
+                new Intent().setComponent(new ComponentName(REDIRECT_PACKAGE, REDIRECT_ACTIVITY)),
+                new Intent(this, MainActivity.class));
     }
 
     // ---- on/off from the launcher's UI -----------------------------------------------------------

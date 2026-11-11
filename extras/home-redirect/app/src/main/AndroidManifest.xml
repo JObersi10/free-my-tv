@@ -32,6 +32,15 @@
             </intent-filter>
         </activity>
 
+        <!-- Plain black no-animation stopover, used only internally (startActivity from this app). -->
+        <activity
+            android:name=".BlackoutActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:launchMode="singleInstance" />
+
         <!-- Screensaver: the Manhattan photos with a slow zoom and a clock. Selected over adb, see the class. -->
         <service
             android:name=".PhotoDream"
