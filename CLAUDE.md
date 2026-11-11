@@ -472,6 +472,20 @@ entries; its system pieces are in `PROTECTED`. USB debugging opens ADB on 5555 t
   home app on is no way around it there: its Home priority wins over ours. `tools/test-remote.sh` (run by
   `tools/check.sh`) checks which TVs and keys match.
   `adb shell input keyevent` doesn't test any of these: injected keys skip the accessibility key filter.
+  Amazon Fire TV isn't in `RemoteKeys` at all: its quick-launch buttons (Netflix/Prime Video/Disney+/Peacock/...)
+  are plain documented `KEYCODE_APP_1`-`APP_4` (confirmed via each remote's keylayout file,
+  `/system/usr/keylayout/Vendor_*_Product_*.kl`), simpler than every vendor above - except Fire OS still never
+  hands them to accessibility's `onKeyEvent` (confirmed live with Key Mapper's own trigger recorder: nothing fired),
+  same as the Home key handled below. There's a separate, Fire-OS-only implementation of this in
+  `extras/home-redirect/` (`HomeRedirectService.checkButtonRedirect`): since the press can't be blocked, it watches
+  for the real app's window appearing (same window-watch trick as the Home redirect) and jumps to the configured
+  target before the user settles on it - which means it fires the same way whether the app was opened by its
+  button or its home-screen icon, since Fire OS gives no event data to tell those apart. Configured entirely over
+  adb, no rebuild: a plain-text `source.package=target.package` (or `=OFF`) file in `com.gathin.tvhome`'s internal
+  storage, reachable with `run-as` (external/scoped storage blocked `run-as` itself from even `mkdir`-ing there on
+  a real device). `universal.sh`'s `configure_button_redirects` drives the whole setup: detects which physical
+  button opens what live (layout differs per remote) and offers only the apps actually installed on that TV as
+  targets (installed apps differ per device too) - nothing about a specific remote or app list is hardcoded.
 - Recent Apps (`RecentApps`, over a 96×54 `ScreenBlur` copy of the window) is off by default: *Home Settings* →
   *Recent Apps* (`Prefs.recents()`: `off`, `drawer`, `home`) adds the drawer shortcut and the app-switch key, and `home`
   also two Home presses within 700 ms (`HomeActivity.onNewIntent`; not offered on Xiaomi TVs, whose remote sends one
