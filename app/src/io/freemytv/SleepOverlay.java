@@ -114,13 +114,27 @@ public class SleepOverlay extends Service {
         }
     };
 
+    /** Only this class touches NotificationChannel/the 2-arg Builder (Android 8+), so SleepOverlay itself still
+     * verifies on Android 7 (same pattern as Ui.Weighted/Variable). */
+    private static final class Channel {
+        static Notification build(SleepOverlay svc) {
+            NotificationManager nm = svc.getSystemService(NotificationManager.class);
+            nm.createNotificationChannel(new NotificationChannel("sleep", Ui.tr("Sleep Timer"), NotificationManager.IMPORTANCE_MIN));
+            return new Notification.Builder(svc, "sleep").setSmallIcon(R.drawable.icon)
+                    .setContentTitle(Ui.tr("Sleep Timer")).build();
+        }
+    }
+
     @Override public void onCreate() {
         super.onCreate();
         // In the foreground first: a quick stop right after the start must not find it still in the background.
-        NotificationManager nm = getSystemService(NotificationManager.class);
-        nm.createNotificationChannel(new NotificationChannel("sleep", Ui.tr("Sleep Timer"), NotificationManager.IMPORTANCE_MIN));
-        startForeground(1, new Notification.Builder(this, "sleep").setSmallIcon(R.drawable.icon)
-                .setContentTitle(Ui.tr("Sleep Timer")).build());
+        // Notification channels (and the 2-arg Builder that takes one) are Android 8+; isolated in Channel below
+        // so this method itself still verifies on Android 7, same as Ui.Weighted/Variable do for their APIs.
+        Notification n = android.os.Build.VERSION.SDK_INT >= 26
+                ? Channel.build(this)
+                : new Notification.Builder(this).setSmallIcon(R.drawable.icon)
+                        .setContentTitle(Ui.tr("Sleep Timer")).setPriority(Notification.PRIORITY_MIN).build();
+        startForeground(1, n);
         Ui.init(this);   // its own process: the app's font isn't loaded here yet
         SleepTimer.listen(this);
         float k = getResources().getDisplayMetrics().widthPixels / 1920f;

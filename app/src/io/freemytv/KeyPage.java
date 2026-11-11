@@ -20,7 +20,6 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -63,7 +62,9 @@ final class KeyPage {
         this.watchmode = watchmode;
         byte[] random = new byte[12];
         new SecureRandom().nextBytes(random);
-        path = "/" + Base64.getUrlEncoder().withoutPadding().encodeToString(random);
+        // java.util.Base64 is Android 8+ only; android.util.Base64 has been there since API 8.
+        path = "/" + android.util.Base64.encodeToString(random,
+                android.util.Base64.URL_SAFE | android.util.Base64.NO_PADDING | android.util.Base64.NO_WRAP);
         server = new ServerSocket(0, 4, lan);   // port 0: a free one the system picks
         url = "http://" + lan.getHostAddress() + ":" + server.getLocalPort() + path;
         Thread t = new Thread(this::serve, "KeyPage");

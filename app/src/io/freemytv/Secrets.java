@@ -12,10 +12,10 @@ import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.List;
 
@@ -36,10 +36,21 @@ public class Secrets extends ContentProvider {
         return new File(new File(c.getFilesDir(), "secrets"), name);
     }
 
+    /** java.nio.file (Files, Path, File.toPath()) doesn't exist at all before Android 8 (API 26); plain java.io
+     * reads the same bytes on every API level, so there's nothing to version-gate here. */
+    private static byte[] readAllBytes(File f) throws IOException {
+        try (FileInputStream in = new FileInputStream(f)) {
+            byte[] buf = new byte[(int) f.length()];
+            int off = 0, n;
+            while (off < buf.length && (n = in.read(buf, off, buf.length - off)) > 0) off += n;
+            return buf;
+        }
+    }
+
     /** The key sent for `name`, or "" (none yet). A small file read: callers keep it rather than ask every frame. */
     static String get(Context c, String name) {
         try {
-            return new String(Files.readAllBytes(file(c, name).toPath()), StandardCharsets.UTF_8).trim();
+            return new String(readAllBytes(file(c, name)), StandardCharsets.UTF_8).trim();
         } catch (IOException e) {
             return "";
         }
@@ -61,7 +72,7 @@ public class Secrets extends ContentProvider {
     private static boolean whole(File f) {
         if (f.length() == 0 || f.length() > 4096) return false;
         try {
-            String v = new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8).trim();
+            String v = new String(readAllBytes(f), StandardCharsets.UTF_8).trim();
             return v.matches("[\\x21-\\x7E]{8,4000}");
         } catch (IOException e) {
             return false;

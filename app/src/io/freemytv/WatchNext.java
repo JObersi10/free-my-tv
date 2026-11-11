@@ -69,8 +69,12 @@ final class WatchNext {
         return it.pkg + "|" + it.title;
     }
 
+    /** Watch Next (TvContract.WatchNextPrograms) is Android 8+ only, with no older equivalent — gating this one
+     * spot keeps it out of both load() and sources() below, since they already check allowed() before touching
+     * TvContract at all. */
     static boolean allowed(Context c) {
-        return c.checkSelfPermission(PERMISSION) == PackageManager.PERMISSION_GRANTED;
+        return android.os.Build.VERSION.SDK_INT >= 26
+                && c.checkSelfPermission(PERMISSION) == PackageManager.PERMISSION_GRANTED;
     }
 
     /** Everything to show, newest first (off the main thread: these are content provider queries). */

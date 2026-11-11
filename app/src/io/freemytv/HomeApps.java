@@ -1221,34 +1221,13 @@ final class HomeApps {
         return shrink(b, TILE_W, TILE_H);
     }
 
-    /** No banner: the app's icon (in its proper shape, with some margin) on a dark card. */
-    private static Bitmap iconTile(Context c, String pkg) {
-        Drawable icon = null;
-        try {
-            PackageManager pm = c.getPackageManager();
-            ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
-            if (ai.icon != 0) {
-                try {
-                    icon = pm.getResourcesForApplication(ai).getDrawableForDensity(ai.icon, DisplayMetrics.DENSITY_XXXHIGH, null);
-                } catch (PackageManager.NameNotFoundException | RuntimeException ignored) {
-                }
-            }
-            if (icon == null) icon = pm.getApplicationIcon(ai);
-        } catch (PackageManager.NameNotFoundException ignored) {
+    /** Only this class touches AdaptiveIconDrawable (Android 8+), so iconTile itself still verifies on Android 7. */
+    private static final class Adaptive {
+        static boolean is(Drawable icon) {
+            return icon instanceof AdaptiveIconDrawable;
         }
-        if (icon == null) return darkTile(TILE_W, TILE_H);
-        boolean adaptive = icon instanceof AdaptiveIconDrawable;
-        // Drawn at the icon's own resolution (the whole tile, so the squircle's edge is smooth too), then filtered down.
-        float drawn = TILE_H * (adaptive ? 0.56f * 1.5f : 0.46f);
-        float k = detail(icon, drawn, drawn);
-        int tw = Math.round(TILE_W * k), th = Math.round(TILE_H * k);
-        Bitmap b = darkTile(tw, th);
-        Canvas canvas = new Canvas(b);
-        int size = Math.round(th * 0.56f);
-        float left = (tw - size) / 2f, top = (th - size) / 2f;
-        if (adaptive) {
-            // Adaptive icon: the layers in a squircle, like an Apple icon. Drawn apart, then filling an anti-aliased
-            // rounded rectangle (clipPath leaves stair-stepped corners).
+
+        static void drawLayers(Drawable icon, Canvas canvas, int size, float left, float top) {
             AdaptiveIconDrawable a = (AdaptiveIconDrawable) icon;
             Bitmap layers = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
             Canvas lc = new Canvas(layers);
@@ -1266,6 +1245,40 @@ final class HomeApps {
             Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
             p.setShader(shader);
             canvas.drawRoundRect(x, y, x + size, y + size, size * 0.2237f, size * 0.2237f, p);
+        }
+    }
+
+    /** No banner: the app's icon (in its proper shape, with some margin) on a dark card. */
+    private static Bitmap iconTile(Context c, String pkg) {
+        Drawable icon = null;
+        try {
+            PackageManager pm = c.getPackageManager();
+            ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
+            if (ai.icon != 0) {
+                try {
+                    icon = pm.getResourcesForApplication(ai).getDrawableForDensity(ai.icon, DisplayMetrics.DENSITY_XXXHIGH, null);
+                } catch (PackageManager.NameNotFoundException | RuntimeException ignored) {
+                }
+            }
+            if (icon == null) icon = pm.getApplicationIcon(ai);
+        } catch (PackageManager.NameNotFoundException ignored) {
+        }
+        if (icon == null) return darkTile(TILE_W, TILE_H);
+        // AdaptiveIconDrawable is Android 8+; isolated in Adaptive below (and short-circuited here) so this
+        // method itself still verifies on Android 7, same pattern as Ui.Weighted/Variable and SleepOverlay.Channel.
+        boolean adaptive = Build.VERSION.SDK_INT >= 26 && Adaptive.is(icon);
+        // Drawn at the icon's own resolution (the whole tile, so the squircle's edge is smooth too), then filtered down.
+        float drawn = TILE_H * (adaptive ? 0.56f * 1.5f : 0.46f);
+        float k = detail(icon, drawn, drawn);
+        int tw = Math.round(TILE_W * k), th = Math.round(TILE_H * k);
+        Bitmap b = darkTile(tw, th);
+        Canvas canvas = new Canvas(b);
+        int size = Math.round(th * 0.56f);
+        float left = (tw - size) / 2f, top = (th - size) / 2f;
+        if (adaptive) {
+            // Adaptive icon: the layers in a squircle, like an Apple icon. Drawn apart, then filling an anti-aliased
+            // rounded rectangle (clipPath leaves stair-stepped corners).
+            Adaptive.drawLayers(icon, canvas, size, left, top);
         } else {
             // Legacy icon (a free-form drawing with transparency): smaller, no frame.
             int s = Math.round(th * 0.46f);
