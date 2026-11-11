@@ -86,10 +86,14 @@ final class Ui {
 
     /** Inter at an optical size (14 = text, 32 = display) and weight; the system font if the file is missing. */
     private static Typeface font(AssetManager a, int opticalSize, int weight) {
-        if (has(a, FONT)) {
+        // Typeface.Builder itself is Android 8+ (minSdk here is 25, for an Android 7.1 Fire TV): the SDK_INT
+        // check has to come before Variable.build is ever reached, not just around it, since referencing a
+        // missing class anywhere in a method's bytecode fails that method's verification on load, before a
+        // surrounding try/catch gets a chance to run. Isolating the call in its own class (as Weighted below
+        // already does for the Android 9 API) defers that class's verification until it's actually loaded.
+        if (Build.VERSION.SDK_INT >= 26 && has(a, FONT)) {
             try {
-                Typeface t = new Typeface.Builder(a, FONT)
-                        .setFontVariationSettings("'opsz' " + opticalSize + ", 'wght' " + weight).build();
+                Typeface t = Variable.build(a, FONT, opticalSize, weight);
                 if (t != null) return t;
             } catch (RuntimeException ignored) {
             }
@@ -97,6 +101,14 @@ final class Ui {
         // Typeface.create(family, weight, italic) is Android 9+; Android 8 only has regular and bold.
         if (Build.VERSION.SDK_INT >= 28) return Weighted.create(weight);
         return Typeface.create(Typeface.DEFAULT, weight >= 600 ? Typeface.BOLD : Typeface.NORMAL);
+    }
+
+    /** Only this class touches the Android 8 call (variable-font support), so Ui itself still verifies on Android 7. */
+    private static final class Variable {
+        static Typeface build(AssetManager a, String font, int opticalSize, int weight) {
+            return new Typeface.Builder(a, font)
+                    .setFontVariationSettings("'opsz' " + opticalSize + ", 'wght' " + weight).build();
+        }
     }
 
     /** Only this class touches the Android 9 call, so Ui itself still verifies on Android 8 (like Recording.Node). */
