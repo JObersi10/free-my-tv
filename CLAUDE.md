@@ -490,6 +490,30 @@ entries; its system pieces are in `PROTECTED`. USB debugging opens ADB on 5555 t
   a real device). `universal.sh`'s `configure_button_redirects` drives the whole setup: detects which physical
   button opens what live (layout differs per remote) and offers only the apps actually installed on that TV as
   targets (installed apps differ per device too) - nothing about a specific remote or app list is hardcoded.
+  Both this and the Home redirect above hand their destination off through `BlackoutActivity` (a plain black,
+  no-animation activity that starts the real destination and finishes immediately) instead of starting it
+  directly: Android keeps Blackout's black content up until the destination has an actual frame ready, no fixed
+  delay, which covers the unwanted app's own render instead of leaving the destination's (sometimes slower)
+  first frame as the only thing masking it - most noticeable, and most helped by this, when the TV is lagging.
+  Button-redirect can be wanted without replacing Home (someone who declines the Home-button question but wants
+  app-button remapping anyway): a `files/home_redirect_off` flag, written by `universal.sh` only in that case,
+  skips just the Home-bounce branch in `onAccessibilityEvent` - its absence is "redirect Home too," unchanged
+  from before the flag existed.
+  Window-watch can't catch a button whose app isn't installed/enabled at all: Fire OS's key policy
+  (`FireTVKeyPolicyManager`) opens that app's Amazon Appstore page instead, never a window to match by package.
+  Fire OS does log the raw press first, though - `KeyPressReceiver: Remote button pressed. keyCode: N`
+  (`github.com/enlightened-d/fire-buttons` worked this out, and only this out: by its own README, its logcat
+  trick is the *only* thing it does, and only fires in this exact case - once the app is installed and enabled,
+  "Fire OS opens it directly and Fire Buttons does nothing," so it's a narrower sibling to this feature, not an
+  alternative to it). `HomeRedirectService` tails `logcat -v brief` in a daemon thread (`READ_LOGS`, force-granted
+  over adb the same way as `WRITE_SECURE_SETTINGS` - not a permission a normal app can request at all) for that
+  line, and redirects on a configured keycode the instant it's seen, no need to wait for the Appstore page.
+  `button_redirects.txt` takes `KEY<n>=target.package` lines for this case, alongside the ordinary
+  `source.package=target.package` ones; `universal.sh`'s detection loop captures the real keycode via
+  `logcat -d | grep 'Remote button pressed'` the moment a button opens the Appstore, instead of just telling
+  the person to install the app first. The Appstore's own delayed second page landing on top a few seconds later
+  (fire-buttons' README documents this) is caught by the ordinary window-watch path once it's just a window
+  (`AMAZON_APPSTORE` + an 8s push-back window), not by the keycode watcher itself.
 - Recent Apps (`RecentApps`, over a 96×54 `ScreenBlur` copy of the window) is off by default: *Home Settings* →
   *Recent Apps* (`Prefs.recents()`: `off`, `drawer`, `home`) adds the drawer shortcut and the app-switch key, and `home`
   also two Home presses within 700 ms (`HomeActivity.onNewIntent`; not offered on Xiaomi TVs, whose remote sends one
