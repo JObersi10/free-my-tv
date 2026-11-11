@@ -114,17 +114,19 @@ public class HomeRedirectService extends AccessibilityService {
     // app was opened by its remote button or by its icon on the home screen - Fire OS gives no event data
     // to tell those apart, so this affects the whole app, not just its dedicated button.
     //
-    // Configured over adb, no app UI, no rebuild needed. One mapping per line in a plain text file at
-    // getExternalFilesDir()/button_redirects.txt (push with adb, e.g.
-    //   adb push button_redirects.txt /sdcard/Android/data/com.gathin.tvhome/files/button_redirects.txt
-    // ), each line "source.package=target.package" or "source.package=OFF" (OFF bounces back to this
+    // Configured over adb, no app UI, no rebuild needed. One mapping per line in a plain text file in this
+    // app's private internal storage (getFilesDir(), not external/scoped storage - adb's "run-as" reaches
+    // that reliably without fighting Android 11's FUSE layer, which blocked external storage here even for
+    // run-as). Push a new one with:
+    //   adb shell "run-as com.gathin.tvhome mkdir -p files" && adb shell "run-as com.gathin.tvhome sh -c 'cat > files/button_redirects.txt'" < button_redirects.txt
+    // Each line is "source.package=target.package" or "source.package=OFF" (OFF bounces back to this
     // launcher, same as pressing Home). Blank lines and lines starting with # are ignored. Re-read whenever
     // its mtime changes, so no restart is needed after pushing a new version.
     private final Map<String, String> buttonRedirects = new HashMap<>();
     private long buttonRedirectsMtime = -1;
 
     private void loadButtonRedirectsIfChanged() {
-        File f = new File(getExternalFilesDir(null), "button_redirects.txt");
+        File f = new File(getFilesDir(), "button_redirects.txt");
         long mtime = f.lastModified();
         if (mtime == buttonRedirectsMtime) return;
         buttonRedirectsMtime = mtime;
