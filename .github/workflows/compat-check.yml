@@ -1,0 +1,30 @@
+# Manual check: builds against platforms;android-25 (this fork's actual floor, for a 2016 Fire TV
+# Stick 2nd gen on Android 7.1) instead of whatever newer platform happens to be installed. javac
+# resolves classes/methods against the real android.jar for that API level, so any call that's
+# actually 26+-only (even one try/catch-wrapped, which doesn't help: a missing class fails to
+# verify, not just to run) shows up as a compile error here instead of a runtime crash on a TV.
+# Run it by hand: gh workflow run compat-check.yml --repo JObersi10/free-my-tv
+name: API 25 compat check
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Android SDK (build-tools 34, platform 25 only — no newer android.jar to fall back to)
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$RUNNER_TEMP/sdk" \
+            "build-tools;34.0.0" "platforms;android-25" > /dev/null
+          echo "ANDROID_HOME=$RUNNER_TEMP/sdk" >> "$GITHUB_ENV"
+
+      - name: Build against android-25
+        run: ./build.sh
